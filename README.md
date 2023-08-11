@@ -1,0 +1,3 @@
+# Carter's Delay
+
+This is a little multi-tap delay I made for my cousin Carter to use. Carter is 6 years old at time of writing, so the instrument had to be pretty simple to use. You just set your input and output devices on lines 8 and 9 (by default, the script will print a list of available devices to the REPL when you run it, which you can then choose from to be sure that the wording of the string is exactly correct, like "Scarlett 4i4 USB" rather than "Scarlett 4i4"). Then place your cursor behind the opening parenthesis on line 1 and hit cmd+period (or ctrl+period on Windows) to execute. This will launch a fullscreen xy oscilloscope that will show you your input and the delay's output. From there, just make sounds into the input and enjoy!
