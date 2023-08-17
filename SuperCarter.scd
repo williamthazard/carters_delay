@@ -1,3 +1,4 @@
+//verison 0.0.3
 (
 Task(
 	{
@@ -44,7 +45,7 @@ Task(
 		SynthDef.new(\micOut, {
 			arg in = 0, out = 0, amp = 1;
 			var sig;
-			sig = Pan2.ar(SoundIn.ar(in!2), level: amp);
+			sig = SoundIn.ar(in) * amp;
 			Out.ar(out, sig);
 		}).add;
 		SynthDef(\ptr, {
@@ -92,7 +93,7 @@ Task(
 				buf,
 				rateCtrl,
 				ptr,
-				2,
+				4,
 				panCtrl,
 				grainEnv
 			);
@@ -110,7 +111,9 @@ Task(
 		~granGrp = Group.after(~recGroup);
 		2.wait;
 		Synth(\mic, [\in, 0, \out, ~micBus, \amp, 0.5], ~micGrp);
-		Synth(\micOut, [\in, 0, \out, ~fb.index, \amp, 0.5], ~granGrp);
+		Synth(\micOut, [\in, 0, \out, 1, \amp, 0.5], ~granGrp);
+		Synth(\micOut, [\in, 0, \out, ~fb.index, \amp, 0.5], ~micGrp);
+		Synth(\micOut, [\in, 0, \out, ~fb.index+1, \amp, 0.5], ~granGrp);
 		Synth(\ptr, [\buf, b, \out, ~ptrBus], ~ptrGrp);
 		Synth(\rec, [\ptrIn, ~ptrBus, \micIn, ~micBus, \buf, b], ~recGrp);
 		~panLFOs = Array.fill(16, {0});
