@@ -10,38 +10,11 @@ Task(
 		s.reboot;
 		2.wait;
 		~timer = LinkClock.new(2).latency_(Server.default.latency).quantum_(0);
-		~player = Array.fill(16, {0});
-		~panLFOs = Array.fill(16, {0});
-		~ampLFOs = Array.fill(16, {0});
-		~cutoffLFOs = Array.fill(16, {0});
-		~resonanceLFOs = Array.fill(16, {0});
-		~b = Array.fill(16, {0});
-		~x = Array.fill(16, {0});
-		16.do({
-			arg i;
-			~b.put(
-				i,
-				Buffer.alloc(s, s.sampleRate * (~timer.beatDur*(16*(i+1))), 2)
-			);
-			~b.scramble;
-			~x.put(
-				i,
-				{
-					var sig;
-					sig = Pan2.ar(SoundIn.ar(0!2));
-					RecordBuf.ar(
-						sig,
-						~b[i],
-						\offset.kr(0),
-						\reclev.kr(1).varlag(0.3),
-						\prelev.kr(-3.dbamp).varlag(0.3),
-						\run.kr(1),
-						\loop.kr(1)
-					);
-				}
-			);
-			~x[i].play;
-		});
+		b = Buffer.alloc(s, s.sampleRate * (~timer.beatDur*512), 1);
+		2.wait;
+		~micBus = Bus.audio(s, 1);
+		~ptrBus = Bus.audio(s, 1);
+		2.wait;
 		Window.closeAll;
 		w = Window("superCarter",Window.availableBounds)
 		.background_(Color.black)
@@ -62,100 +35,89 @@ Task(
 		.waveColors_([Color.grey,Color.white])
 		.background_(Color.black)
 		.start;
-		Task({
-			SynthDef(\PlayBufPlayer, {
-				arg out=0,
-				bufnum=0,
-				rate=1,
-				start=0,
-				end=1,
-				t_trig=0,
-				loops=1,
-				amp=0.2,
-				pan=0,
-				rateSlew=0.1,
-				panSlew=1,
-				bus=0;
-				var snd,
-				snd2,
-				pos,
-				pos2,
-				frames,
-				duration,
-				env,
-				sig,
-				startA,
-				endA,
-				startB,
-				endB,
-				crossfade,
-				aOrB;
-				aOrB=ToggleFF.kr(t_trig);
-				startA=Latch.kr(start,aOrB);
-				endA=Latch.kr(end,aOrB);
-				startB=Latch.kr(start,1-aOrB);
-				endB=Latch.kr(end,1-aOrB);
-				crossfade=Lag.ar(K2A.ar(aOrB),0.5);
-				rate=Lag.kr(rate,rateSlew)*BufRateScale.kr(bufnum);
-				frames=BufFrames.kr(bufnum);
-				duration=frames*(end-start)/rate.abs/s.sampleRate*loops;
-				env=EnvGen.ar(
-					Env.new(
-						levels: [0,amp,amp,0],
-						times: [0,duration-0.1,0.1],
-					),
-					gate:t_trig,
-				);
-				pos=Phasor.ar(
-					trig:aOrB,
-					rate:rate,
-					start:(((rate>0)*startA)+((rate<0)*endA))*frames,
-					end:(((rate>0)*endA)+((rate<0)*startA))*frames,
-					resetPos:(((rate>0)*startA)+((rate<0)*endA))*frames,
-				);
-				snd=BufRd.ar(
-					numChannels:1,
-					bufnum:bufnum,
-					phase:pos,
-					interpolation:4,
-				);
-				pos2=Phasor.ar(
-					trig:(1-aOrB),
-					rate:rate,
-					start:(((rate>0)*startB)+((rate<0)*endB))*frames,
-					end:(((rate>0)*endB)+((rate<0)*startB))*frames,
-					resetPos:(((rate>0)*startB)+((rate<0)*endB))*frames,
-				);
-				snd2=BufRd.ar(
-					numChannels:1,
-					bufnum:bufnum,
-					phase:pos2,
-					interpolation:4,
-				);
-				sig=Pan2.ar(
-					MoogFF.ar(
-						in: (crossfade*snd)+((1-crossfade)*snd2) * env,
-						freq: \cutoff.kr(12000),
-						gain: \resonance.kr(1)),
-					pan
-				);
-				Out.ar(bus!2,sig)
-			}).play(s, [\out, 0]);
-		}).play;
+		SynthDef.new(\mic, {
+			arg in = 0, out = 0, amp = 1;
+			var sig;
+			sig = SoundIn.ar(in) * amp;
+			Out.ar(out, sig);
+		}).add;
+		SynthDef.new(\micOut, {
+			arg in = 0, out = 0, amp = 1;
+			var sig;
+			sig = Pan2.ar(SoundIn.ar(in!2), level: amp);
+			Out.ar(out, sig);
+		}).add;
+		SynthDef(\ptr, {
+			arg out = 0, buf = 0, rate = 1;
+			var sig;
+			sig = Phasor.ar(0, BufRateScale.kr(buf)*rate, 0, BufFrames.kr(buf));
+			Out.ar(out, sig);
+		}).add;
+
+		SynthDef.new(\rec, {
+			arg ptrIn = 0, micIn = 0, buf = 0;
+			var ptr, sig;
+			ptr = In.ar(ptrIn, 1);
+			sig = In.ar(micIn, 1);
+			BufWr.ar(sig, buf, ptr);
+		}).add;
+
+		SynthDef(\gran, {
+			arg amp = 0.5, buf = 0, out = 0,
+			atk = 1, rel = 1, gate = 1,
+			sync = 1, dens = 40,
+			baseDur = 0.05, durRand = 1,
+			rate = 1, rateRand = 1,
+			pan = 0, panRand = 0,
+			grainEnv = (-1), ptrBus = 0, ptrSampleDelay = 20000,
+			ptrRandSamples = 5000, minPtrDelay = 1000;
+			var sig, env, densCtrl, durCtrl, rateCtrl, panCtrl,
+			ptr, ptrRand, totalDelay, maxGrainDur;
+			env = EnvGen.kr(Env.asr(atk,1,rel), gate, doneAction: 2);
+			densCtrl = Select.ar(sync, [Dust.ar(dens), Impulse.ar(dens)]);
+			durCtrl = baseDur * LFNoise1.ar(100).exprange(1/durRand, durRand);
+			rateCtrl = rate.lag3(0.5) * LFNoise1.ar(100).exprange(1/rateRand, rateRand);
+			panCtrl = pan + LFNoise1.kr(100).bipolar(panRand);
+			ptrRand = LFNoise1.ar(100).bipolar(ptrRandSamples);
+			totalDelay = max(ptrSampleDelay - ptrRand, minPtrDelay);
+			ptr = In.ar(ptrBus, 1);
+			ptr = ptr - totalDelay;
+			ptr = ptr / BufFrames.kr(buf);
+			maxGrainDur = (totalDelay / rateCtrl) / SampleRate.ir;
+			durCtrl = min(durCtrl, maxGrainDur);
+			sig = GrainBuf.ar(
+				2,
+				densCtrl,
+				durCtrl,
+				buf,
+				rateCtrl,
+				ptr,
+				2,
+				panCtrl,
+				grainEnv
+			);
+			sig = MoogFF.ar(
+				sig * env * amp,
+				freq: \cutoff.kr(12000),
+				gain: \resonance.kr(1)
+			);
+			Out.ar(out, sig);
+		}).add;
 		2.wait;
-		8.do({
-			arg i;
-			~player.put(i,
-				Synth(
-					\PlayBufPlayer,
-					[\bufnum, ~b[i], \rate, (i+1)*0.25, \bus, ~fb.index]
-			));
-			~player.put(i+8,
-				Synth(
-					\PlayBufPlayer,
-					[\bufnum, ~b[i+8], \rate, (i+1)*(-0.25), \bus, ~fb.index]
-			));
-		});
+		~micGrp = Group.new;
+		~ptrGrp = Group.after(~micGrp);
+		~recGrp = Group.after(~ptrGrp);
+		~granGrp = Group.after(~recGroup);
+		2.wait;
+		Synth(\mic, [\in, 0, \out, ~micBus, \amp, 0.5], ~micGrp);
+		Synth(\micOut, [\in, 0, \out, ~fb.index, \amp, 0.5], ~granGrp);
+		Synth(\ptr, [\buf, b, \out, ~ptrBus], ~ptrGrp);
+		Synth(\rec, [\ptrIn, ~ptrBus, \micIn, ~micBus, \buf, b], ~recGrp);
+		~panLFOs = Array.fill(16, {0});
+		~ampLFOs = Array.fill(16, {0});
+		~cutoffLFOs = Array.fill(16, {0});
+		~resonanceLFOs = Array.fill(16, {0});
+		2.wait;
 		16.do({
 			arg i;
 			~panLFOs.put(i,
@@ -165,7 +127,7 @@ Task(
 			);
 			~ampLFOs.put(i,
 				Ndef(i+16.asSymbol, {
-					LFTri.kr(~timer.beatDur/rrand(1,64)).range(0.7,2)
+					LFTri.kr(~timer.beatDur/rrand(1,64)).range(0,2)
 				})
 			);
 			~cutoffLFOs.put(i,
@@ -179,25 +141,6 @@ Task(
 				})
 			)
 		});
-		~player.scramble;
-		16.do({
-			arg i;
-			Tdef(i.asSymbol, {
-				loop {
-					~player[i].set(
-						\t_trig,1,
-						\start,[0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5].choose,
-						\end,[0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95].choose,
-						\loops,1,
-						\amp,~ampLFOs[i],
-						\pan, ~panLFOs[i],
-						\cutoff, ~cutoffLFOs[i],
-						\resonance, ~resonanceLFOs[i]
-					);
-					~timer.beatDur*[1,2,4,8,16,32,64].wchoose([0.6,0.2,0.1,0.05,0.05]).wait;
-				}
-			}).play(~timer, quant:4);
-		});
 		~af = SynthDef("duoscope", { arg bus, bufnum;
 			var z;
 			z = In.ar(bus, 2);
@@ -208,6 +151,36 @@ Task(
 			args: [\bus, ~fb.index, \bufnum, ~bf.bufnum],
 			addAction: \addToTail
 		);
-	}
-).play(AppClock);
+		~timer.beatDur*4.wait;
+		~rates = 16.collect({arg i; ((i+1)*0.25)}).scramble;
+		~durs = 16.collect({arg i; ~timer.beatDur*(i+1)}).scramble;
+		~delays = 16.collect({arg i; s.sampleRate*(~timer.beatDur*(i+1))*16}).scramble;
+		~g = 16.collect({
+			arg n;
+			Synth(\gran, [
+				\amp, ~ampLFOs[n],
+				\buf, b,
+				\out, ~fb.index,
+				\atk, 1,
+				\rel, 1,
+				\gate, 1,
+				\sync, 1,
+				\dens, 1/(~durs[n]*~rates[n]),
+				\baseDur, ~durs[n],
+				\durRand, 1,
+				\rate, ~rates[n],
+				\rateRand, 1,
+				\pan, ~panLFOs[n],
+				\panRand, 0,
+				\grainEnv, -1,
+				\ptrBus, ~ptrBus,
+				\ptrSampleDelay, ~delays[n],
+				\ptrRandSamples, s.sampleRate*(~timer.beatDur*((n%8)+1))*2,
+				\minPtrDelay, ~delays[n],
+				\cutoff, ~cutoffLFOs[n],
+				\resonance, ~resonanceLFOs[n]
+			], ~granGrp;
+			)
+		});
+}).play(AppClock)
 )
