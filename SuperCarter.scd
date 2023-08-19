@@ -1,4 +1,4 @@
-//verison 0.0.3
+//verison 0.0.4
 (
 Task(
 	{
@@ -7,8 +7,9 @@ Task(
 		o.memSize_(2.pow(20));
 		ServerOptions.devices;
 		o.inDevice_("Scarlett 4i4 USB");
-		o.outDevice_("Scarlett 4i4 USB");
+		o.outDevice_("External Headphones");
 		s.reboot;
+		s.latency_(0.5);
 		2.wait;
 		~timer = LinkClock.new(2).latency_(Server.default.latency).quantum_(0);
 		b = Buffer.alloc(s, s.sampleRate * (~timer.beatDur*512), 1);
@@ -54,7 +55,6 @@ Task(
 			sig = Phasor.ar(0, BufRateScale.kr(buf)*rate, 0, BufFrames.kr(buf));
 			Out.ar(out, sig);
 		}).add;
-
 		SynthDef.new(\rec, {
 			arg ptrIn = 0, micIn = 0, buf = 0;
 			var ptr, sig;
@@ -62,7 +62,6 @@ Task(
 			sig = In.ar(micIn, 1);
 			BufWr.ar(sig, buf, ptr);
 		}).add;
-
 		SynthDef(\gran, {
 			arg amp = 0.5, buf = 0, out = 0,
 			atk = 1, rel = 1, gate = 1,
@@ -130,7 +129,7 @@ Task(
 			);
 			~ampLFOs.put(i,
 				Ndef(i+16.asSymbol, {
-					LFTri.kr(~timer.beatDur/rrand(1,64)).range(0,2)
+					LFTri.kr(~timer.beatDur/rrand(1,64)).range(1,3)
 				})
 			);
 			~cutoffLFOs.put(i,
