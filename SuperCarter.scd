@@ -1,4 +1,4 @@
-//verison 0.0.4
+//verison 0.0.5
 (
 Task(
 	{
@@ -7,7 +7,7 @@ Task(
 		o.memSize_(2.pow(20));
 		ServerOptions.devices;
 		o.inDevice_("Scarlett 4i4 USB");
-		o.outDevice_("External Headphones");
+		o.outDevice_("Scalett 4i4 USB");
 		s.reboot;
 		s.latency_(0.5);
 		2.wait;
@@ -154,7 +154,7 @@ Task(
 			addAction: \addToTail
 		);
 		~timer.beatDur*4.wait;
-		~rates = 16.collect({arg i; ((i+1)*0.25)}).scramble;
+		~rates = [1/4,2/6,3/8,4/10,1/2,2/3,3/4,4/5,1,5/4,4/3,3/2,2/1,10/4,8/3,6/2];
 		~durs = 16.collect({arg i; ~timer.beatDur*(i+1)}).scramble;
 		~delays = 16.collect({arg i; s.sampleRate*(~timer.beatDur*(i+1))*16}).scramble;
 		~g = 16.collect({
